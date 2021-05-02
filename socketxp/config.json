@@ -1,0 +1,10 @@
+{
+	"tunnel_enabled": true,
+	"tunnels": [{
+		"destination": "https://kubernetes.default",
+		"protocol": "tls",
+		"custom_domain": "",
+		"subdomain": ""
+	}],
+	"relay_enabled": false
+}

@@ -1,0 +1,34 @@
+apiVersion: apps/v1
+kind: ReplicaSet
+metadata:
+  name: socketxp
+  labels:
+    app: socketxp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: socketxp
+  template:
+    metadata:
+      labels:
+        app: socketxp
+    spec:
+      containers:
+      - name: socketxp
+        image: expresssocket/socketxp:latest
+        env:
+          - name: AUTHTOKEN
+            valueFrom:
+              secretKeyRef:
+                name: socketxp-credentials
+                key: authtoken
+        volumeMounts:
+        - name: config-volume
+          mountPath: /data
+      volumes:
+        - name: config-volume
+          configMap:
+            # Provide the name of the ConfigMap containing the files you want
+            #to add to the container
+            name: socketxp-configmap

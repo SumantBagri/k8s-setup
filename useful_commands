@@ -1,0 +1,121 @@
+URL https://medium.com/platformer-blog/kubernetes-multi-node-cluster-with-multipass-on-ubuntu-18-04-desktop-f80b92b1c6a7
+
+==================================================================================================================
+
+# Initiatlize kubernetes cluster using multipass
+#multipass launch --name master-k8s --cpus 2 --mem 2048M --disk 5G
+#multipass launch --name worker-1-k8s --cpus 2 --mem 2048M --disk 5G
+#multipass launch --name worker-2-k8s --cpus 2 --mem 2048M --disk 5G
+
+==================================================================================================================
+
+# Setup master-node in cluster
+curl -sSL get.docker.com | sh && sudo usermod -aG docker ${USER}
+
+curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add - && \
+  echo "deb http://apt.kubernetes.io/ kubernetes-xenial main" | sudo tee /etc/apt/sources.list.d/kubernetes.list && \
+  sudo apt-get update -q && \
+  sudo apt-get install -qy kubeadm
+
+sudo swapoff -a
+
+sudo kubeadm init --pod-network-cidr=10.244.0.0/16
+
+# Add worker nodes to cluster
+kubeadm join 10.172.125.134:6443 --token 2sgfk5.18ljzf08sk0dco4i --discovery-token-ca-cert-hash sha256:fba2794b44d7f29967e7c82090886adc30b51128130666bfd6ceb4785c7015a7
+
+==================================================================================================================
+
+# Iptables routing commands
+sudo iptables -t nat -A PREROUTING -i eth0 -p tcp --dport 80 -j DNAT --to-destination 192.0.2.2
+
+	sudo iptables -t nat -A PREROUTING -i wlp7s0 -p tcp --dport 6443 -j DNAT --to-destination 10.172.125.134
+
+sudo iptables -t nat -A POSTROUTING -o eth1 -p tcp --dport 80 -d 192.0.2.2 -j SNAT --to-source 192.0.2.15
+
+	sudo iptables -t nat -A POSTROUTING -o mpqemubr0 -p tcp --dport 6443 -d 10.172.125.134 -j SNAT --to-source 192.0.2.15
+
+==================================================================================================================
+
+# Setup socketexp
+kc create secret generic socketxp-credentials --from-literal=authtoken=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE2MjIwMjMzNTQsImlkIjoiU3VtYW50QmFncmlAZ2l0aHViLmNvbSJ9.thBw34ElbhDZJl87CSUmM7CzOpyLyxI4Um4QSFess7c
+
+kc create configmap socketxp-configmap --from-file=~/repos/k8s-setup/socketxp_config.json
+
+==================================================================================================================
+
+# Add new dns/ip to the kubernetes apiserver
+# On all the control-nodes (only 1 in our setup)
+sudo rm /etc/kubernetes/pki/apiserve.*
+sudo kubeadm init phase certs apiserver --apiserver-cert-extra-sans=localhost,127.0.0.1,sumantbagri-2oko9oq4.socketxp.com,34.122.60.35
+
+==================================================================================================================
+
+# SSH-tunneling
+ssh -o ExitOnForwardFailure=yes -f -N -L 6443:10.172.125.134:6443 y2k@192.168.50.76 -i ~/.ssh/id_rsa.pub
+
+==================================================================================================================
+
+# Create airflow namespace
+kc apply -f namespaces/airflow.json
+
+==================================================================================================================
+
+# Setup NFS server: https://linuxize.com/post/how-to-install-and-configure-an-nfs-server-on-ubuntu-20-04/
+
+sudo apt install nfs-kernel-server
+sudo mkdir -p /opt/k8s-pod/data/airflow/dags
+sudo mkdir -p /srv/nfs4/airflow/dags # /srv/nfs4/ is the root dir of nfs
+mount --bind /opt/k8s-pod/data/airflow/dags/ /srv/nfs4/airflow/dags/
+
+# Edit /etc/fstab to persist bind
+/opt/k8s-pod/data/airflow/dags/ /srv/nfs4/airflow/dags/ none bind 0 0
+
+# Edit /etc/exports to define export rules
+/srv/nfs4               192.168.50.0/24(rw,sync,no_subtree_check,crossmnt,fsid=0) 10.0.0.0/8(rw,sync,no_subtree_check,crossmnt,fsid=0)
+/srv/nfs4/airflow/dags/ 192.168.50.0/24(ro,sync,no_subtree_check) 192.168.50.76(rw,sync,no_subtree_check) 10.0.0.0/8(rw,sync,no_subtree_check)
+
+# Export shares
+sudo exportfs -ar
+
+# View active exports
+sudo exportfs -v
+
+# Setup NFS client
+sudo apt install nfs-common
+sudo mkdir -p /mnt/airflow/dags
+
+# Mount NFS on client
+mount -t nfs -o vers=4 192.168.50.76:/airflow/dags /mnt/airflow/dags
+
+==================================================================================================================
+
+# Create pv
+kubectl create -f nfs-pv-dag.yaml
+
+# Create pvc
+kubectl create -f nfs-pvc-dags.yaml
+
+==================================================================================================================
+
+# Install helm
+
+curl https://baltocdn.com/helm/signing.asc | sudo apt-key add -\
+sudo apt-get install apt-transport-https --yes
+echo "deb https://baltocdn.com/helm/stable/debian/ all main" | sudo tee /etc/apt/sources.list.d/helm-stable-debian.list
+sudo apt-get update
+sudo apt-get install helm
+
+# Create svc and crb for tiller to run helm
+kubectl create serviceaccount --namespace kube-system tiller
+kubectl create clusterrolebinding tiller-cluster-rule --clusterrole=cluster-admin --serviceaccount=kube-system:tiller
+kubectl patch deploy --namespace kube-system tiller-deploy -p '{"spec":{"template":{"spec":{"serviceAccount":"tiller"}}}}'      
+helm init --service-account tiller --upgrade
+
+==================================================================================================================
+
+# Adding new user+group for nfs
+
+groupadd -g 1255 nfs
+useradd -u 1255 -g 1255 -M nfs
+

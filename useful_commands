@@ -86,7 +86,10 @@ sudo apt install nfs-common
 sudo mkdir -p /mnt/airflow/dags
 
 # Mount NFS on client
-mount -t nfs -o vers=4 192.168.50.76:/airflow/dags /mnt/airflow/dags
+mount -t nfs -o vers=4 192.168.50.76:/srv/nfs4/airflow/dags/ /mnt/airflow/dags
+
+# Persist mounts across reboots
+192.168.50.76:/srv/nfs4/airflow/dags/ /mnt/airflow/dags   nfs   defaults,timeo=900,retrans=5,_netdev	0 0
 
 ==================================================================================================================
 

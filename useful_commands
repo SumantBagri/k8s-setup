@@ -122,3 +122,20 @@ helm init --service-account tiller --upgrade
 groupadd -g 1255 nfs
 useradd -u 1255 -g 1255 -M nfs
 
+==================================================================================================================
+
+# Update apiserver certificates
+
+# remove current apiserver certificates
+sudo rm /etc/kubernetes/pki/apiserver.*
+
+# generate new certificates
+sudo kubeadm init phase certs apiserver --apiserver-cert-extra-sans=localhost,127.0.0.1,sumantbagri-2oko9oq4.socketxp.com,34.122.60.35,juggernaut,192.168.50.76
+
+==================================================================================================================
+
+# Change the memory/cpu allocations for multipass vms
+
+sudo systemctl stop snap.multipass.multipassd.service
+sudo vi /var/snap/multipass/common/data/multipassd/multipassd-vm-instances.json
+sudo systemctl start snap.multipass.multipassd.service
